@@ -6,6 +6,7 @@ import { Experience } from './components/Experience';
 import { UIOverlay } from './components/UIOverlay';
 import { GestureController } from './components/GestureController';
 import { TreeMode } from './types';
+import { getSharedImages } from './supabase';
 
 // Simple Error Boundary to catch 3D resource loading errors (like textures)
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
@@ -66,17 +67,10 @@ export default function App() {
       setIsLoadingShare(true);
 
       try {
-        // Try API first (works in vercel dev and production)
-        try {
-          const response = await fetch(`/api/share?id=${shareId}`);
-          const data = await response.json();
-
-          if (response.ok && data.success) {
-            setUploadedPhotos(data.images);
-            return;
-          }
-        } catch (apiError) {
-          console.log('API not available, trying localStorage fallback');
+        const images = await getSharedImages(shareId);
+        if (images) {
+          setUploadedPhotos(images);
+          return;
         }
 
         // Fallback to localStorage if API fails (pure vite dev mode)

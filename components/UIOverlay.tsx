@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { TreeMode } from '../types';
+import { createShare, uploadSharedPhoto } from '../supabase';
 
 interface UIOverlayProps {
   mode: TreeMode;
@@ -93,60 +94,36 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
     setUploadProgress('准备上传...');
 
     try {
-      // Step 1: Get presigned upload URLs from server
-      setUploadProgress('获取上传地址...');
-      const urlsResponse = await fetch('/api/get-upload-urls', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageCount: uploadedPhotos.length,
-        }),
-      });
-
-      // If API returns 404, use localStorage fallback
-      if (urlsResponse.status === 404) {
-        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname.includes('127.0.0.1');
-        
-        if (isLocalDev) {
-          console.log('API not available, using localStorage fallback');
-          try {
-            const shareId = Math.random().toString(36).substring(2, 10);
-            const shareData = {
-              images: uploadedPhotos,
-              createdAt: Date.now(),
-            };
-            localStorage.setItem(`share_${shareId}`, JSON.stringify(shareData));
-            const shareLink = `${window.location.origin}/?share=${shareId}`;
-            setShareLink(shareLink);
-            return;
-          } catch (storageError: any) {
-            setShareError('图片数据太大，请减少照片数量或大小');
-            return;
-          }
-        } else {
-          throw new Error('API 未配置，请检查部署设置');
-        }
-      }
-
-      const urlsData = await urlsResponse.json();
-
-      if (!urlsResponse.ok) {
-        throw new Error(urlsData.error || '获取上传地址失败');
-      }
-
-      const { shareId, uploadUrls } = urlsData;
-
-      // Step 2: Upload images directly to R2 using presigned URLs
+      const shareId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
       setUploadProgress(`上传照片中 (0/${uploadedPhotos.length})...`);
-      
+
       let uploadedCount = 0;
       const uploadPromises = uploadedPhotos.map(async (photo, index) => {
         const blob = base64ToBlob(photo);
-        const { uploadUrl, publicUrl } = uploadUrls[index];
+        const path = `${shareId}/${index}.jpg`;
+        const publicUrl = await uploadSharedPhoto(path, blob);
 
-        const uploadResponse = await fetch(uploadUrl, {
+        uploadedCount++;
+        setUploadProgress(`上传照片中 (${uploadedCount}/${uploadedPhotos.length})...`);
+        return publicUrl;
+      });
+
+      const imageUrls = await Promise.all(uploadPromises);
+      setUploadProgress('生成分享链接...');
+
+      await createShare(shareId, imageUrls);
+      setShareLink(`${window.location.origin}/?share=${shareId}`);
+    } catch (error: any) {
+      console.error('Share error:', error);
+      setShareError(error.message || '分享失败，请重试');
+    } finally {
+      setIsSharing(false);
+      setUploadProgress('');
+    }
+  };
+
+  /*
+      const uploadResponse = await fetch(uploadUrl, {
           method: 'PUT',
           body: blob,
           headers: {
@@ -210,11 +187,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ mode, onToggle, onPhotosUp
       }
       
       setShareError(error.message || '分享失败，请重试');
-    } finally {
-      setIsSharing(false);
-      setUploadProgress('');
-    }
-  };
+  */
 
   const handleCopyLink = async () => {
     if (!shareLink) return;
